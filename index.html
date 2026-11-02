@@ -553,14 +553,34 @@ a{color:inherit}
       try { localStorage.setItem("nken-chokan-push-endpoint", ep); } catch(e){}
     });
   }
+  function isStandalone(){
+    return window.navigator.standalone === true || !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+  }
+  // うまくいかなかったときに、原因を Mac に知らせる（中継は宛先と同じ。Mac は logs/push-diag.log に残す）
+  function pushDiag(step, err, oncePerDay){
+    if (!S.pushCfg) return;
+    if (oncePerDay) {
+      var k = "nken-chokan-diag-" + step, d = new Date().toISOString().slice(0, 10);
+      try { if (localStorage.getItem(k) === d) return; localStorage.setItem(k, d); } catch(e){}
+    }
+    var body = JSON.stringify({diag: step, err: err ? String((err && err.message) || err).slice(0, 200) : "",
+      perm: ("Notification" in window) ? Notification.permission : "none", standalone: isStandalone(),
+      host: location.host, ua: navigator.userAgent.slice(0, 200)});
+    fetch("https://ntfy.sh/" + encodeURIComponent(S.pushCfg.relayTopic), {method: "POST", body: body}).catch(function(){});
+  }
   async function initPush(){
-    if (!("serviceWorker" in navigator)) return;
     var isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    var standalone = window.navigator.standalone === true || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
-    try { S.swReg = await navigator.serviceWorker.register("sw.js"); } catch(e){ return; }
-    if (!("PushManager" in window) || !("Notification" in window)) { if (isIOS && !standalone) { S.push = "need-home"; render(); } return; }
+    var standalone = isStandalone();
+    if (!("serviceWorker" in navigator)) return;
     try { S.pushCfg = await getJSON("push-config.json"); } catch(e){ return; }
-    if (Notification.permission === "denied") { S.push = "denied"; render(); return; }
+    // ホーム画面から開いたのにボタンを出せないときは、その理由を1日1回だけ Mac に知らせる
+    try { S.swReg = await navigator.serviceWorker.register("sw.js"); } catch(e){ if (isIOS && standalone) pushDiag("sw-register-failed", e, true); return; }
+    if (!("PushManager" in window) || !("Notification" in window)) {
+      if (isIOS && !standalone) { S.push = "need-home"; render(); }
+      else if (isIOS) pushDiag("no-push-support", "", true);
+      return;
+    }
+    if (Notification.permission === "denied") { S.push = "denied"; render(); if (isIOS) pushDiag("permission-denied", "", true); return; }
     var sub = null; try { sub = await S.swReg.pushManager.getSubscription(); } catch(e){}
     if (sub && Notification.permission === "granted") { S.push = "on"; relaySub(sub).catch(function(){}); }
     else S.push = "off";
@@ -570,14 +590,15 @@ a{color:inherit}
     if (!S.pushCfg || !("Notification" in window)) return;
     S.push = "busy"; render();
     Notification.requestPermission().then(async function(perm){
-      if (perm !== "granted") { S.push = perm === "denied" ? "denied" : "off"; render(); return; }
+      if (perm !== "granted") { pushDiag("permission-" + perm); S.push = perm === "denied" ? "denied" : "off"; render(); return; }
       try {
         var reg = await navigator.serviceWorker.ready;
         var sub = await reg.pushManager.getSubscription();
         if (!sub) sub = await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: b64uToBytes(S.pushCfg.vapidPublicKey)});
         await relaySub(sub, true);
-        S.push = "on"; S.pushMsg = "通知をオンにしました。毎朝7時に届きます。";
+        S.push = "on"; S.pushMsg = "通知をオンにしました。5分ほどで「朝刊」から試しの通知が届きます。そのあとは毎朝7時に届きます。";
       } catch(e) {
+        pushDiag("subscribe-failed", e);
         S.push = "error"; S.pushMsg = "通知をオンにできませんでした（" + (e && e.message ? e.message : "不明") + "）。もう一度押してください。";
       }
       render();
