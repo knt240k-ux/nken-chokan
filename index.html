@@ -533,7 +533,9 @@ a{color:inherit}
     }
     if (S.push === "busy") return '<button class="push-cta" disabled>' + BELL + '<span><b>通知の設定をしています…</b><small>「許可」を押してください</small></span></button>';
     if (S.push === "need-home") return '<p class="notice">毎朝7時の通知は、ホーム画面に追加した「朝刊」のアイコンから開くとオンにできます。</p>';
-    if (S.push === "denied") return '<p class="notice warn">通知が止められています。iPhone の「設定」→「通知」→「朝刊」で、通知を許可にしてください。</p>';
+    if (S.push === "denied") return /iPhone|iPad|iPod/.test(navigator.userAgent) ?
+      '<p class="notice warn">通知が止められています。iPhone の「設定」→「通知」→「朝刊」で、通知を許可にしてください。</p>' :
+      '<p class="notice warn">このブラウザでは通知が止められています。iPhone のホーム画面の「朝刊」から開くと、毎朝7時の通知をオンにできます。</p>';
     if (S.push === "on" && S.pushMsg) return '<p class="notice">' + esc(S.pushMsg) + '</p>';
     return "";
   }
